@@ -1,0 +1,377 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Deepfake Detector</title>
+
+<!-- Tailwind CSS (CDN) -->
+<script src="https://cdn.tailwindcss.com"></script>
+<!-- Lucide icons -->
+<script src="https://unpkg.com/lucide@latest/dist/umd/lucide.min.js"></script>
+
+<!-- Fonts -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Inter', 'system-ui', 'sans-serif'],
+          mono: ['JetBrains Mono', 'monospace'],
+        },
+      },
+    },
+  };
+</script>
+
+<style>
+  body { font-family: 'Inter', system-ui, sans-serif; }
+
+  /* Ambient background glow */
+  .bg-aurora {
+    background:
+      radial-gradient(1100px 520px at 50% -10%, rgba(99,102,241,.22), transparent 60%),
+      radial-gradient(900px 600px at 90% 10%, rgba(168,85,247,.14), transparent 60%),
+      radial-gradient(700px 500px at 0% 30%, rgba(56,189,248,.08), transparent 60%),
+      #020617;
+  }
+
+  /* Spinner */
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .spin { animation: spin .7s linear infinite; }
+
+  /* Verdict pulse */
+  @keyframes pulse-fake {
+    0%,100% { box-shadow: 0 0 0 0 rgba(244,63,94,.45); }
+    50%     { box-shadow: 0 0 36px 6px rgba(244,63,94,.28); }
+  }
+  @keyframes pulse-real {
+    0%,100% { box-shadow: 0 0 0 0 rgba(16,185,129,.45); }
+    50%     { box-shadow: 0 0 36px 6px rgba(16,185,129,.28); }
+  }
+  .pulse-fake { animation: pulse-fake 2.2s ease-in-out infinite; }
+  .pulse-real { animation: pulse-real 2.2s ease-in-out infinite; }
+
+  /* Probability bar shimmer */
+  @keyframes shimmer { 100% { transform: translateX(100%); } }
+  .shimmer::after {
+    content:""; position:absolute; inset:0;
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,.25), transparent);
+    transform: translateX(-100%);
+    animation: shimmer 1.8s ease-in-out infinite;
+  }
+
+  /* Fade/slide in */
+  @keyframes rise { from { opacity:0; transform: translateY(10px); } to { opacity:1; transform:none; } }
+  .rise { animation: rise .45s cubic-bezier(.16,1,.3,1) both; }
+
+  input[type=range] { accent-color: #6366f1; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background:#1e293b; border-radius:99px; }
+</style>
+</head>
+
+<body class="bg-aurora min-h-screen text-slate-200 antialiased">
+
+<div class="mx-auto max-w-3xl px-5 py-10 sm:py-14">
+
+  <!-- Header -->
+  <header class="text-center">
+    <h1 class="mt-5 bg-gradient-to-br from-indigo-300 via-violet-300 to-fuchsia-300 bg-clip-text text-4xl font-extrabold tracking-tight text-transparent sm:text-5xl">
+      Deepfake Detector
+    </h1>
+    <p class="mx-auto mt-3 max-w-md text-sm text-slate-400">
+      Upload an image or video and get a manipulation verdict.
+    </p>
+  </header>
+
+  <!-- Main card -->
+  <div class="rounded-3xl border border-slate-800/80 bg-slate-900/50 p-6 shadow-2xl shadow-indigo-950/40 backdrop-blur-xl sm:p-8">
+
+    <!-- Method (ViT only) -->
+    <div class="rounded-2xl border-2 border-indigo-500/70 bg-indigo-500/10 p-4 text-left">
+      <div class="flex items-center gap-2.5">
+        <span class="flex h-9 w-9 items-center justify-center rounded-xl bg-indigo-500/15 text-indigo-300">
+          <i data-lucide="scan-face" class="h-5 w-5"></i>
+        </span>
+        <div>
+          <div class="text-sm font-semibold text-slate-100">ViT-B/16</div>
+          <div class="text-xs text-slate-400">Image &amp; video</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Drop zone -->
+    <label id="drop-zone"
+      ondragover="handleDragOver(event)" ondragleave="handleDragLeave(event)" ondrop="handleDrop(event)"
+      class="group relative mt-6 flex cursor-pointer flex-col items-center justify-center rounded-2xl border-2 border-dashed border-slate-700 bg-slate-800/30 px-6 py-12 text-center transition-all duration-200 hover:border-indigo-500/70 hover:bg-indigo-500/[0.06]">
+      <input type="file" id="file-input" accept="image/*,video/*" onchange="handleFile(this.files[0])"
+        class="absolute inset-0 cursor-pointer opacity-0" />
+      <span class="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-800 text-indigo-300 ring-1 ring-slate-700 transition-transform group-hover:scale-110">
+        <i data-lucide="upload-cloud" class="h-7 w-7"></i>
+      </span>
+      <div class="mt-4 text-base font-semibold text-slate-200">Drag &amp; drop or click to browse</div>
+      <div id="accept-hint" class="mt-1 text-xs text-slate-500">Accepts images (jpg, png, webp) and videos (mp4, avi, mov, mkv)</div>
+      <div id="file-name" class="mt-3 hidden items-center gap-1.5 rounded-full bg-indigo-500/10 px-3 py-1 text-xs font-medium text-indigo-300"></div>
+    </label>
+
+    <!-- Preview -->
+    <div id="preview-wrap" class="mt-4 hidden overflow-hidden rounded-2xl border border-slate-800 bg-black">
+      <img id="img-preview" class="mx-auto hidden max-h-72 w-full object-contain" />
+      <video id="vid-preview" controls class="mx-auto hidden max-h-72 w-full object-contain"></video>
+    </div>
+
+    <!-- Submit -->
+    <button id="submit-btn" onclick="submitPrediction()" disabled
+      class="mt-6 flex w-full items-center justify-center gap-2.5 rounded-2xl bg-gradient-to-r from-indigo-500 to-violet-500 px-6 py-4 text-base font-bold text-white shadow-lg shadow-indigo-900/40 transition-all hover:from-indigo-400 hover:to-violet-400 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:from-indigo-500 disabled:hover:to-violet-500">
+      <i data-lucide="sparkles" id="submit-icon" class="h-5 w-5"></i>
+      <svg id="submit-spinner" class="spin hidden h-5 w-5" viewBox="0 0 24 24" fill="none">
+        <circle cx="12" cy="12" r="9" stroke="currentColor" stroke-width="3" stroke-opacity=".3"></circle>
+        <path d="M21 12a9 9 0 0 0-9-9" stroke="currentColor" stroke-width="3" stroke-linecap="round"></path>
+      </svg>
+      <span id="submit-text">Analyse</span>
+    </button>
+  </div>
+
+  <!-- Error box -->
+  <div id="error-box"
+    class="mt-5 hidden items-start gap-2.5 rounded-2xl border border-rose-500/30 bg-rose-500/10 px-4 py-3.5 text-sm text-rose-300">
+    <i data-lucide="alert-triangle" class="mt-0.5 h-4 w-4 shrink-0"></i>
+    <span id="error-text"></span>
+  </div>
+
+  <!-- Results dashboard -->
+  <div id="result-card" class="mt-5 hidden">
+    <div class="rise rounded-3xl border border-slate-800/80 bg-slate-900/50 p-6 shadow-2xl shadow-indigo-950/40 backdrop-blur-xl sm:p-8">
+
+      <!-- Verdict -->
+      <div id="verdict-badge"
+        class="mx-auto flex w-full max-w-xs items-center justify-center gap-3 rounded-2xl py-5 text-3xl font-black tracking-[0.15em]">
+        <span id="verdict-text">&mdash;</span>
+      </div>
+
+      <!-- Probability gauge -->
+      <div class="mt-7">
+        <div class="mb-2 flex items-end justify-between">
+          <span class="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
+            <i data-lucide="activity" class="h-3.5 w-3.5"></i> Fake probability
+          </span>
+          <span id="r-prob" class="font-mono text-2xl font-bold text-slate-100">&mdash;</span>
+        </div>
+        <div class="relative h-3 overflow-hidden rounded-full bg-slate-800">
+          <div id="prob-fill" class="shimmer relative h-full w-0 rounded-full transition-[width] duration-700 ease-out"></div>
+        </div>
+        <div class="mt-1.5 flex justify-between text-[11px] font-medium text-slate-500">
+          <span>Authentic</span><span>Manipulated</span>
+        </div>
+      </div>
+
+      <!-- Stat blocks -->
+      <div class="mt-7 grid grid-cols-2 gap-3 sm:grid-cols-3">
+        <div class="rounded-2xl border border-slate-800 bg-slate-800/30 p-4">
+          <div class="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500">
+            <i data-lucide="timer" class="h-3.5 w-3.5"></i> Inference
+          </div>
+          <div id="r-time" class="mt-1.5 font-mono text-lg font-bold text-slate-100">&mdash;</div>
+        </div>
+        <div class="rounded-2xl border border-slate-800 bg-slate-800/30 p-4">
+          <div class="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500">
+            <i data-lucide="cpu" class="h-3.5 w-3.5"></i> Model
+          </div>
+          <div id="r-method" class="mt-1.5 text-sm font-bold text-slate-100">&mdash;</div>
+        </div>
+        <div class="col-span-2 rounded-2xl border border-slate-800 bg-slate-800/30 p-4 sm:col-span-1">
+          <div class="flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-slate-500">
+            <i data-lucide="film" class="h-3.5 w-3.5"></i> Frames
+          </div>
+          <div id="r-frames" class="mt-1.5 font-mono text-lg font-bold text-slate-100">&mdash;</div>
+        </div>
+      </div>
+
+      <!-- Grad-CAM evidence panel -->
+      <div id="gradcam-wrap" class="mt-7 hidden">
+        <div class="mb-2.5 flex items-center justify-between">
+          <span class="flex items-center gap-1.5 text-xs font-medium uppercase tracking-wide text-slate-400">
+            <i data-lucide="flame" class="h-3.5 w-3.5 text-orange-400"></i> Grad-CAM &mdash; what the model looked at
+          </span>
+          <span id="gradcam-meta" class="font-mono text-[11px] text-slate-500"></span>
+        </div>
+        <div class="overflow-hidden rounded-2xl border border-slate-800 bg-black">
+          <img id="gradcam-img" class="mx-auto max-h-80 w-full object-contain" />
+        </div>
+        <div class="mt-2 flex items-center gap-3 text-[11px] text-slate-500">
+          <span class="flex items-center gap-1.5">
+            <span class="h-2.5 w-2.5 rounded-sm bg-gradient-to-r from-blue-500 to-cyan-400"></span> Low influence
+          </span>
+          <span class="flex items-center gap-1.5">
+            <span class="h-2.5 w-2.5 rounded-sm bg-gradient-to-r from-yellow-400 to-rose-500"></span> High influence
+          </span>
+        </div>
+      </div>
+
+      <!-- Method note -->
+      <div id="method-note"
+        class="mt-6 rounded-xl border-l-2 border-indigo-500/70 bg-indigo-500/[0.07] px-4 py-3 text-xs leading-relaxed text-slate-400"></div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  const selectedMethod = "vit";
+  const FIXED_THRESHOLD = 0.5;
+  let selectedFile   = null;
+
+  function handleDragOver(e) {
+    e.preventDefault();
+    const z = document.getElementById("drop-zone");
+    z.classList.add("border-indigo-400", "bg-indigo-500/10", "ring-2", "ring-indigo-500/40");
+  }
+  function handleDragLeave(e) {
+    const z = document.getElementById("drop-zone");
+    z.classList.remove("border-indigo-400", "bg-indigo-500/10", "ring-2", "ring-indigo-500/40");
+  }
+  function handleDrop(e) {
+    e.preventDefault();
+    handleDragLeave(e);
+    const f = e.dataTransfer.files[0];
+    if (f) handleFile(f);
+  }
+
+  function handleFile(f) {
+    if (!f) return;
+    selectedFile = f;
+
+    const nameEl = document.getElementById("file-name");
+    nameEl.innerHTML = '<i data-lucide="file" class="h-3.5 w-3.5"></i> ' + f.name;
+    nameEl.classList.remove("hidden");
+    nameEl.classList.add("inline-flex");
+
+    const imgEl = document.getElementById("img-preview");
+    const vidEl = document.getElementById("vid-preview");
+    const wrap  = document.getElementById("preview-wrap");
+    imgEl.classList.add("hidden");
+    vidEl.classList.add("hidden");
+
+    const url = URL.createObjectURL(f);
+    if (f.type.startsWith("image/")) {
+      imgEl.src = url; imgEl.classList.remove("hidden");
+    } else if (f.type.startsWith("video/")) {
+      vidEl.src = url; vidEl.classList.remove("hidden");
+    }
+    wrap.classList.remove("hidden");
+
+    document.getElementById("submit-btn").disabled = false;
+    hideResult();
+    lucide.createIcons();
+  }
+
+  function clearFile() {
+    selectedFile = null;
+    const nameEl = document.getElementById("file-name");
+    nameEl.textContent = "";
+    nameEl.classList.add("hidden");
+    nameEl.classList.remove("inline-flex");
+    document.getElementById("file-input").value = "";
+    document.getElementById("preview-wrap").classList.add("hidden");
+    document.getElementById("submit-btn").disabled = true;
+    hideResult();
+  }
+
+  function hideResult() {
+    document.getElementById("result-card").classList.add("hidden");
+    const eb = document.getElementById("error-box");
+    eb.classList.add("hidden");
+    eb.classList.remove("flex");
+  }
+
+  function setLoading(on) {
+    const btn = document.getElementById("submit-btn");
+    document.getElementById("submit-icon").classList.toggle("hidden", on);
+    document.getElementById("submit-spinner").classList.toggle("hidden", !on);
+    document.getElementById("submit-text").textContent = on ? "Analysing…" : "Analyse";
+    btn.disabled = on;
+  }
+
+  async function submitPrediction() {
+    if (!selectedFile) return;
+    setLoading(true);
+    hideResult();
+
+    const fd = new FormData();
+    fd.append("file", selectedFile);
+    fd.append("method", selectedMethod);
+    fd.append("threshold", FIXED_THRESHOLD);
+
+    try {
+      const resp = await fetch("/predict", { method: "POST", body: fd });
+      const data = await resp.json();
+      if (data.error) showError(data.error);
+      else showResult(data);
+    } catch (e) {
+      showError("Network error: " + e.message);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function showError(msg) {
+    const eb = document.getElementById("error-box");
+    document.getElementById("error-text").textContent = msg;
+    eb.classList.remove("hidden");
+    eb.classList.add("flex");
+    lucide.createIcons();
+  }
+
+  function showResult(d) {
+    const isFake = d.verdict === "FAKE";
+
+    const badge = document.getElementById("verdict-badge");
+    badge.className =
+      "mx-auto flex w-full max-w-xs items-center justify-center gap-3 rounded-2xl py-5 text-3xl font-black tracking-[0.15em] " +
+      (isFake
+        ? "bg-rose-500/15 text-rose-400 pulse-fake"
+        : "bg-emerald-500/15 text-emerald-400 pulse-real");
+    document.getElementById("verdict-text").textContent = isFake ? "FAKE" : "REAL";
+
+    const prob = d.fake_probability ?? 0;
+    document.getElementById("r-prob").textContent = prob + "%";
+    const fill = document.getElementById("prob-fill");
+    fill.className = "shimmer relative h-full rounded-full transition-[width] duration-700 ease-out " +
+      (isFake ? "bg-gradient-to-r from-rose-500 to-orange-400"
+              : "bg-gradient-to-r from-emerald-500 to-teal-400");
+    requestAnimationFrame(() => { fill.style.width = prob + "%"; });
+
+    document.getElementById("r-time").textContent =
+      (d.inference_time_s ?? "—") + (d.inference_time_s != null ? "s" : "");
+    document.getElementById("r-method").textContent =
+      d.method === "vit" ? "ViT-B/16" : "CNN + RNN";
+    document.getElementById("r-frames").textContent =
+      d.frames_analyzed != null ? d.frames_analyzed : (d.file_type === "image" ? "1" : "—");
+
+    const gWrap = document.getElementById("gradcam-wrap");
+    if (d.gradcam) {
+      document.getElementById("gradcam-img").src = d.gradcam;
+      const parts = [];
+      if (d.gradcam_frame != null) parts.push("frame " + d.gradcam_frame);
+      if (d.attention_weight != null) parts.push("attn " + d.attention_weight);
+      document.getElementById("gradcam-meta").textContent = parts.join(" · ");
+      gWrap.classList.remove("hidden");
+    } else {
+      gWrap.classList.add("hidden");
+    }
+
+    document.getElementById('method-note').textContent = d.method === 'vit' ? "This model uses a Vision Transformer (ViT) to analyze the image or video frames." : "Your alternate text goes here.";
+    document.getElementById("result-card").classList.remove("hidden");
+    lucide.createIcons();
+    document.getElementById("result-card").scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }
+
+  lucide.createIcons();
+</script>
+</body>
+</html>
